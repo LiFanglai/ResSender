@@ -2,9 +2,11 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Sockets;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Forms;
+
 namespace ResSender
 {
     public enum InstLevel
@@ -120,7 +122,7 @@ namespace ResSender
 
         private void btnOpen_Click(object sender, RoutedEventArgs e)
         {
-            var openFiledlg = new FolderBrowserDialog();
+            var openFiledlg = new System.Windows.Forms.FolderBrowserDialog();
             var result = openFiledlg.ShowDialog();
             rootFolder = openFiledlg.SelectedPath;
 
@@ -158,7 +160,7 @@ namespace ResSender
             }
         }
 
-        private void btnSend_Click(object sender, RoutedEventArgs e)
+        private async void btnSend_Click(object sender, RoutedEventArgs e)
         {
             if (resList.Count <= 0)
             {
@@ -180,6 +182,8 @@ namespace ResSender
                 //YYYYDDMM格式的时间
                 sr.WriteLine(datePicker.SelectedDate.Value.ToString("yyyyMMdd"));
                 sr.Flush();
+
+                progBar.Maximum = resList.Count;
 
                 for (int i = 0; i < resList.Count; i++)
                 {
@@ -210,16 +214,41 @@ namespace ResSender
                     client.Client.SendFile(resList[i].Path);
 
                     ns.Read(response);
+
+                    await ProgressBegin(i, progBar.Value);
                 }
 
                 sr.Close();
                 client.Close();
                 System.Windows.MessageBox.Show("上传完毕", "提示");
+                ResetProgress();
             }
-            catch(Exception exc)
+            catch (Exception exc)
             {
                 System.Windows.MessageBox.Show(exc.ToString(), "警告");
             }
+        }
+
+        private async Task ProgressBegin(int cur, double value)
+        {
+            await Task.Run(() =>
+                {
+                    for (int i = (int)value; i <= cur; i++)
+                    {
+                        Application.Current.Dispatcher.BeginInvoke((ThreadStart)delegate { this.progBar.Value = i + 1; });
+                        Thread.Sleep(5);
+                    }
+
+                }
+            );
+        }
+
+        private void ResetProgress()
+        {
+            Task.Run(() =>
+            {
+                Application.Current.Dispatcher.BeginInvoke((ThreadStart)delegate { this.progBar.Value = 0; });
+            });
         }
     }
 
