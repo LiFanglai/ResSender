@@ -1,12 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.Globalization;
+using System.IO;
+using System.Net.Sockets;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
 using System.Windows.Forms;
-
 namespace ResSender
 {
     public enum InstLevel
@@ -22,7 +20,7 @@ namespace ResSender
     /// </summary>
     public partial class MainWindow : Window
     {
-        List<List<string>> instList = new List<List<string>>()
+        public static List<List<string>> instList = new List<List<string>>()
         {
             new List<string>()
             {
@@ -80,6 +78,10 @@ namespace ResSender
                 "",
             },
         };
+        static List<ResFile> resList = new List<ResFile>();
+        static string rootFolder = "";
+        static string serverIP = "192.168.2.207";
+        static int port = 2309;
 
         public MainWindow()
         {
@@ -95,30 +97,38 @@ namespace ResSender
 
             fileDataGrid.SelectionMode = DataGridSelectionMode.Extended;
             fileDataGrid.SelectionUnit = DataGridSelectionUnit.FullRow;
-
-            List<ResFile> files = new List<ResFile>()
-            {
-                new ResFile(){path = "111", level = InstLevel.其他, instIndex = 0, keyword = "test"},
-                new ResFile(){path = "111", level = InstLevel.其他, instIndex = 0, keyword = "test"},
-                new ResFile(){path = "111", level = InstLevel.其他, instIndex = 0, keyword = "test"},
-                new ResFile(){path = "111", level = InstLevel.其他, instIndex = 0, keyword = "test"},
-                new ResFile(){path = "111", level = InstLevel.其他, instIndex = 0, keyword = "test"},
-                new ResFile(){path = "111", level = InstLevel.其他, instIndex = 0, keyword = "test"},
-            };
-
-            fileDataGrid.ItemsSource = files;
+            fileDataGrid.CanUserAddRows = false;
+            fileDataGrid.CanUserDeleteRows = false;
         }
 
         private void btnApply_Click(object sender, RoutedEventArgs e)
         {
-            output.Text = datePicker.SelectedDate.Value.ToString("yyyyMMdd");
+            if (fileDataGrid.SelectedItems.Count > 0)
+            {
+                for (int i = 0; i < fileDataGrid.SelectedItems.Count; i++)
+                {
+                    ResFile rf = fileDataGrid.SelectedItems[i] as ResFile;
+                    rf.Level = (InstLevel)comboLevel.SelectedItem;
+                    rf.InstIndex = comboInst.SelectedIndex;
+                    rf.keyword = textKeyword.Text;
+                }
+            }
+
+            fileDataGrid.Items.Refresh();
+            textKeyword.Text = "";
         }
 
         private void btnOpen_Click(object sender, RoutedEventArgs e)
         {
             var openFiledlg = new FolderBrowserDialog();
             var result = openFiledlg.ShowDialog();
-            output.Text = openFiledlg.SelectedPath.ToString();
+            rootFolder = openFiledlg.SelectedPath;
+
+            resList.Clear();
+            getFileRecur(rootFolder, rootFolder);
+
+            fileDataGrid.ItemsSource = resList;
+            fileDataGrid.Items.Refresh();
         }
 
         private void btnClose_Click(object sender, RoutedEventArgs e)
@@ -131,14 +141,102 @@ namespace ResSender
             comboInst.ItemsSource = instList[comboLevel.SelectedIndex];
             comboInst.SelectedIndex = 0;
         }
+
+        public static void getFileRecur(string path, string root)
+        {
+            if (Directory.Exists(path))
+            {
+                foreach (string p in Directory.GetFiles(path))
+                {
+                    resList.Add(new ResFile() { Path = p, Level = InstLevel.其他, InstIndex = 0, keyword = "" });
+                }
+
+                foreach (string subDir in Directory.GetDirectories(path))
+                {
+                    getFileRecur(subDir, root);
+                }
+            }
+        }
+
+        private void btnSend_Click(object sender, RoutedEventArgs e)
+        {
+            if (resList.Count <= 0)
+            {
+                System.Windows.MessageBox.Show("还未选择任何文件", "提示");
+                return;
+            }
+
+            try
+            {
+                TcpClient client = new TcpClient(serverIP, port);
+                NetworkStream ns = client.GetStream();
+                StreamWriter sr = new StreamWriter(ns);
+                byte[] response = new byte[4];
+
+                //文件总数
+                sr.WriteLine(resList.Count);
+                sr.Flush();
+
+                //YYYYDDMM格式的时间
+                sr.WriteLine(datePicker.SelectedDate.Value.ToString("yyyyMMdd"));
+                sr.Flush();
+
+                for (int i = 0; i < resList.Count; i++)
+                {
+                    //文件字节长度
+                    byte[] fileBytes = File.ReadAllBytes(resList[i].Path);
+                    sr.WriteLine(fileBytes.Length);
+                    sr.Flush();
+
+                    //文件相对路径
+                    string fileName = Path.GetRelativePath(rootFolder, resList[i].Path);
+                    sr.WriteLine(fileName);
+                    sr.Flush();
+
+                    //级别
+                    sr.WriteLine((int)resList[i].Level);
+                    sr.Flush();
+
+                    //单位id
+                    sr.WriteLine(resList[i].InstIndex);
+                    sr.Flush();
+
+                    //关键词
+                    sr.WriteLine(resList[i].keyword);
+                    sr.Flush();
+
+                    //文件内容
+                    ns.Read(response);
+                    client.Client.SendFile(resList[i].Path);
+
+                    ns.Read(response);
+                }
+
+                sr.Close();
+                client.Close();
+                System.Windows.MessageBox.Show("上传完毕", "提示");
+            }
+            catch(Exception exc)
+            {
+                System.Windows.MessageBox.Show(exc.ToString(), "警告");
+            }
+        }
     }
 
     public class ResFile
     {
-        public string path = "";
-        public InstLevel level = InstLevel.其他;
-        public int instIndex = 0;
-        public string keyword = "";
+        public string Path { get; set; }
+        public InstLevel Level { get; set; }
+        public int InstIndex { get; set; }
+        public string keyword { get; set; }
+        public string InstName
+        {
+            set { }
+            get
+            {
+                return MainWindow.instList[Convert.ToInt32(Level)][InstIndex];
+            }
+        }
     }
 
 }
